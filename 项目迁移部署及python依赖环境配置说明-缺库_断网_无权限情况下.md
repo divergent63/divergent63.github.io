@@ -1,0 +1,157 @@
+# 项目迁移部署及python依赖环境配置手册
+
+## 									----目标机器缺库、断网、无权限
+
+
+
+本手册解释说明了在目标机器缺库、断网、无权限情况下
+
+	1. 配置基于CentOS的WSL子系统，在子系统上安装系统依赖库(gcc、make等)
+	1. 在正确位置编译python源码包并用对应pip3安装项目相关依赖(pandas、pytorch等)
+	1. 用编译好的python3可执行脚本运行要部署的源码程序等.
+
+不一定是最优方案, 但是初步测试可行, 欢迎指教.
+
+
+
+<!--其中 ' > ' 后指令在Windows Power Shell下执行; ' r# ' 后指令在root权限下执行; ' $ ' 在非root权限下执行.-->
+
+
+
+### 0. [CentOS内核与发行版本相关](https://blog.csdn.net/zhaihaibo168/article/details/102673669)
+
+
+
+### 1. WSL子系统配置
+
+##### **1.0 [常用WSL指令](https://docs.microsoft.com/zh-cn/windows/wsl/basic-commands)**
+
+##### **1.1 [配置基于CentOS 7.3.1611内核的WSL](https://www.jianshu.com/p/0900a5c0037f)**
+
+- 开启**管理员**powershell[安装WSL](https://docs.microsoft.com/zh-cn/windows/wsl/install-manual)
+
+  ​		`> dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart`
+
+  ​		`> dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`
+
+  
+
+- 安装centos子系统
+
+  - 下载[centos 7.3.1611](https://github.com/CentOS/sig-cloud-instance-images/tree/CentOS-7.3.1611)
+
+  - powershell安装Chocolatey和LxRunOffline 
+
+    `> Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))`
+
+    `> choco install lxrunoffline`
+
+  - 使用LxRunOffline安装下载的centos镜像 (***.tar.xz) 
+
+    `> LxRunOffline install -n <CUSTOM_DIST_NAME> -d <CUSTOM_WSL_PKG_DIR> -f <CUSTOM_IMAGE_DIR/***.tar.xz>				# CUSTOM_DIST_NAME可以是centos731611test;CUSTOM_WSL_PKG_DIR为CUSTOM_DIST_NAME子系统的安装位置; CUSTOM_IMAGE_DIR为下载的镜像位置`
+
+  - 进入自定义名称的子系统命令行
+
+    `> wsl -d <CUSTOM_DIST_NAME>`
+
+##### **1.2 [检查子系统必须的依赖库](https://blog.csdn.net/qq_32656561/article/details/107528126)**并安装编译相关的系统依赖
+
+- 执行搜索包指令, PKG_NAME为包名, 无需带版本号等后缀
+
+​	 	`r# rpm -qa |grep <PKG_NAME>						# 检查是否已部署该库`
+
+
+
+- 如果缺库，需要root权限安装缺失的库，**在python编译完成后迁移项目时不需要这些依赖库**
+
+  - 如果**有网络**，直接通过yum install **无脑安装**
+
+  ​		`r# yum -y groupinstall "Development tools"`
+
+  ​		`r# yum -y install zlib-devel bzip2-devel openssl-devel ncurses-devel 		sqlite-devel readline-devel tk-devel gdbm-devel db4-devel libpcap-devel xz-devel`
+
+  ​		`r# yum install libffi-devel -y`
+
+  ​		`r# yum install gcc automake autoconf libtool make -y`
+
+  ​		`r# yum install gcc gcc-c++`
+
+  - 在无网络情况下需先在外网下载预编译rpm包并执行 (!!! 如果子系统内核老旧, 很多镜像站可能已经不提供rpm包，需要多方查找)
+
+​				`r# rpm -ivh <PKG_NAME***>.rpm				# 使用预编译的rpm包安装库`
+
+
+
+### 2. 项目迁移及python开发环境配置
+
+<!--该部分root用户或非root用户均可-->
+
+##### **2.0 迁移开发项目代码至子系统的$ /home/<USER_NAME>文件夹下**
+
+##### **2.1 python库编译**
+
+- [安装编译python](https://www.cnblogs.com/jimlau/p/12049808.html) 
+
+​			`r# wget https://www.python.org/ftp/python/3.9.7/Python-3.9.7.tgz`
+
+​			`r# tar -xzf Python-3.9.7.tgz`
+
+​			`r# cd Python-3.9.7`
+
+​			`r# mkdir -p /home/<USER_NAME>/<PRJ_NAME>/python39/		# root用户直接在/home文件夹下，PRJ_NAME可以是ProjectA`
+
+​			`r# ./configure --prefix="/home/<USER_NAME>/<PRJ_NAME>/python39/`
+
+​			`r# make && make install`
+
+
+
+- 配置项目所需的python第三方库
+
+  ​		`r# /home/<USER_NAME>/<PRJ_NAME>/python39/bin/pip3 install pandas openpyxl protobuf tianshou==0.4.4`
+
+
+##### **2.2 开发项目配置**
+
+- 建立可执行脚本
+
+​			`r# cd /home/<USER_NAME>/<PRJ_NAME>`
+
+​			`r# vi run_server_main.sh`
+
+
+
+- insert模式输入 `./python39/bin/python3 ./src/server_main.py` 并保存退出, 其中server_main.py即待部署项目的python执行脚本
+
+##### **2.3 打包和输出至Windows母系统, 也可不压缩直接输出至Windows**
+
+​			`r# tar -zcvf ProjectA_for_centos731611.tar.gz /home/<USER_NAME>/<PRJ_NAME>`
+
+​			`r# cp -a /home/<USER_NAME>/ProjectA_for_centos731611.tar.gz /mnt/e/Prj/WSL/PADeployForGameServer/FromServer`
+
+
+
+### 3. 测试
+
+##### **3.0 按照1. 中指令配置新的centos测试子系统并创建非root用户**
+
+- [创建非root用户](https://blog.csdn.net/GJ454221763/article/details/113244458)和[切换用户](https://blog.csdn.net/qq_42003566/article/details/86064990)  
+
+  `$ adduser <UNROOT_USER_NAME>`
+
+  `$ su <UNROOT_USER_NAME>`
+
+##### **3.1 将打包的项目拷贝到测试子系统中并解包**
+
+​		`$ cp -a /mnt/e/Prj/WSL/PADeployForGameServer/FromServer/ProjectA_for_centos731611.tar.gz /home/<UNROOT_USER_NAME>/ `
+
+##### **3.2 在解包的项目文件夹`/home/<UNROOT_USER_NAME>/<PRJ_NAME>`下运行测试脚本**
+
+​		`$ sh run_server_main.sh`
+
+
+
+
+
+
+
